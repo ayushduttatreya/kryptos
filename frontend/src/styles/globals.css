@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Backgrounds — warm dark, not cold black */
+    --bg-primary:    #1a1815;
+    --bg-secondary:  #211f1c;
+    --bg-tertiary:   #2a2825;
+    --bg-elevated:   #333027;
+    --bg-overlay:    rgba(26, 24, 21, 0.92);
+
+    /* Accent — one color, used sparingly */
+    --accent:        #c9a96e;
+    --accent-dim:    rgba(201, 169, 110, 0.12);
+    --accent-glow:   0 0 24px rgba(201, 169, 110, 0.15);
+    --accent-hover:  #d4b87e;
+
+    /* Text hierarchy */
+    --text-primary:  #e8e4dc;
+    --text-secondary:#9e9a93;
+    --text-muted:    #5a5750;
+    --text-inverse:  #1a1815;
+
+    /* Semantic — muted, never screaming */
+    --success:       #6db584;
+    --warning:       #c9956e;
+    --error:         #c96e6e;
+    --info:          #6e8fc9;
+
+    /* Borders — barely there */
+    --border:        rgba(255, 255, 255, 0.06);
+    --border-accent: rgba(201, 169, 110, 0.25);
+    --border-focus:  rgba(201, 169, 110, 0.5);
+
+    /* Typography */
+    --font-sans: 'Geist', 'Inter', sans-serif;
+    --font-mono: 'Geist Mono', 'JetBrains Mono', monospace;
+
+    /* Radius */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+
+    /* Shadows — warm tinted */
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.6);
+  }
+
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+}
