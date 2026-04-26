@@ -51,8 +51,28 @@ function deriveSharedSecret(privateKey, publicKey) {
   return sodium.crypto_scalarmult(privateKey, publicKey);
 }
 
+/**
+ * Derive a deterministic X25519 keypair from a shared seed phrase.
+ *
+ * Cryptographically: prk = BLAKE2b-512(seed), private = clamp(prk[0:32]),
+ * public = X25519(private, base). Both parties with the same seed get the
+ * identical keypair, enabling silent static-key DH without any network
+ * round-trip.
+ *
+ * @param {string} seed - Shared seed phrase (out-of-band QR code).
+ * @returns {{publicKey: Uint8Array, privateKey: Uint8Array}} 32-byte keys.
+ */
+function deriveKeypairFromSeed(seed) {
+  const seedBytes = sodium.from_string(seed);
+  const hash = sodium.crypto_generichash(64, seedBytes);
+  const privateKey = hash.slice(0, 32);
+  const publicKey = sodium.crypto_scalarmult_base(privateKey);
+  return { publicKey, privateKey };
+}
+
 module.exports = {
   ready,
   generateKeypair,
   deriveSharedSecret,
+  deriveKeypairFromSeed,
 };
