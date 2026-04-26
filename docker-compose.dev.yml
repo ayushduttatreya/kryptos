@@ -1,0 +1,31 @@
+version: '3.9'
+
+services:
+  redis:
+    ports:
+      - "6379:6379"
+    # Expose Redis in dev for debugging with RedisInsight
+
+  backend:
+    build:
+      target: build
+    volumes:
+      - ./src:/app/src
+      - /app/node_modules
+    command: npm run dev
+    environment:
+      NODE_ENV: development
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build:
+      target: build
+    volumes:
+      - ./frontend/src:/app/src
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:4000
