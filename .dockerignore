@@ -5,11 +5,10 @@ node_modules
 .env
 .env.*
 !.env.example
-docker
 *.log
 .DS_Store
 coverage
 .nyc_output
 tests
-frontend
 scripts
+backend

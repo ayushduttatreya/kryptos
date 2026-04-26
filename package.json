@@ -5,7 +5,9 @@
   "main": "src/index.js",
   "scripts": {
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "dev": "node src/index.js",
+    "start": "node src/index.js"
   },
   "dependencies": {
     "libsodium-wrappers": "^0.7.13",

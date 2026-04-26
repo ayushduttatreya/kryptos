@@ -1,16 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ThreatModelBadge from '../shared/ThreatModelBadge';
+import { getIdentity } from '../../api/backend';
 
-const RightPanel = () => {
+const RightPanel = ({ selectedContact }) => {
   const [showQr, setShowQr] = useState(false);
+  const [identity, setIdentity] = useState(null);
+
+  useEffect(() => {
+    const fetchIdentity = async () => {
+      const data = await getIdentity();
+      if (data) setIdentity(data);
+    };
+    fetchIdentity();
+  }, []);
 
   return (
     <div className="w-[280px] bg-bgSecondary border-l border-borderBase p-5 h-full overflow-y-auto shrink-0 flex flex-col space-y-6">
       
       <div>
         <h3 className="text-[0.875rem] font-semibold tracking-[0.08em] uppercase text-textMuted mb-2">CONTACT NODE</h3>
-        <div className="text-[1rem] font-medium text-textPrimary mb-1">Alice</div>
-        <div className="font-mono text-[0.8rem] text-accent mb-2">a3f7c2b9</div>
+        <div className="text-[1rem] font-medium text-textPrimary mb-1">{selectedContact?.name || identity?.handle || 'Alice'}</div>
+        <div className="font-mono text-[0.8rem] text-accent mb-2">{selectedContact?.fingerprint || identity?.fingerprint || 'a3f7c2b9'}</div>
         <div className="text-[0.75rem] text-textMuted">Last seen: 2 mins ago</div>
       </div>
 

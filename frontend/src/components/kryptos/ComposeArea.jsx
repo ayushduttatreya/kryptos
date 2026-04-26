@@ -12,18 +12,19 @@ const CheckCircle = ({ text, done }) => (
   </>
 );
 
-const ComposeArea = () => {
+const ComposeArea = ({ onSend }) => {
   const [text, setText] = useState('');
   const [isPriority, setIsPriority] = useState(false);
   const [sending, setSending] = useState(false);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!text.trim() || sending) return;
     setSending(true);
-    setTimeout(() => {
+    const result = await onSend?.(text, isPriority);
+    if (result && result.success) {
       setText('');
-      setSending(false);
-    }, 1500);
+    }
+    setSending(false);
   };
 
   return (

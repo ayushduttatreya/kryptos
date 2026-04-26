@@ -1,8 +1,11 @@
 import React from 'react';
 
-const ContactCard = ({ active, name, msg, time, unread }) => {
+const ContactCard = ({ active, name, msg, time, unread, onClick }) => {
   return (
-    <div className={`relative p-3 rounded-md cursor-pointer transition-all duration-150 border flex flex-col ${active ? 'bg-bgTertiary border-borderBase' : 'bg-transparent border-transparent hover:bg-bgTertiary'}`}>
+    <div 
+      onClick={onClick}
+      className={`relative p-3 rounded-md cursor-pointer transition-all duration-150 border flex flex-col ${active ? 'bg-bgTertiary border-borderBase' : 'bg-transparent border-transparent hover:bg-bgTertiary'}`}
+    >
       {active && <div className="absolute left-0 top-0 bottom-0 w-1 bg-accent rounded-l-md" />}
       
       <div className={`flex justify-between items-center mb-1 ${active ? 'pl-2' : ''}`}>

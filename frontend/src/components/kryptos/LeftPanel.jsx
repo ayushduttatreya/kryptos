@@ -1,7 +1,36 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import ContactCard from './ContactCard';
+import { getContacts, getChannelsStatus } from '../../api/backend';
 
-const LeftPanel = () => {
+const LeftPanel = ({ selectedContact, onSelectContact }) => {
+  const [contacts, setContacts] = useState([]);
+  const [channels, setChannels] = useState({ imgur: { status: 'unknown' }, gist: { status: 'unknown' } });
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const contactsData = await getContacts();
+      setContacts(contactsData);
+      const channelsData = await getChannelsStatus();
+      if (channelsData) {
+        setChannels(channelsData);
+      }
+    };
+    fetchData();
+    // Poll every 30 seconds
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatLastSeen = (timestamp) => {
+    const diff = Date.now() - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return 'Yesterday';
+  };
+
   return (
     <div className="w-[260px] bg-bgSecondary border-r border-borderBase flex flex-col shrink-0 h-full">
       <div className="h-[120px] p-4 flex flex-col justify-center border-b border-borderBase shrink-0">
@@ -35,20 +64,34 @@ const LeftPanel = () => {
         </button>
         
         <div className="space-y-2 flex-1">
-          <ContactCard active name="Alice" msg="ok I'll check the drop" time="14:32" unread={2} />
-          <ContactCard name="Bob" msg="connection established" time="Yesterday" />
+          {contacts.map((contact) => (
+            <ContactCard 
+              key={contact.id}
+              active={selectedContact?.id === contact.id}
+              name={contact.name}
+              msg={contact.lastMessage || 'connection established'}
+              time={formatLastSeen(contact.lastSeen)}
+              onClick={() => onSelectContact(contact)}
+            />
+          ))}
         </div>
       </div>
 
       <div className="h-[100px] border-t border-borderBase p-4 flex flex-col shrink-0 bg-bgSecondary">
         <h3 className="text-[0.875rem] font-semibold tracking-[0.08em] uppercase text-textMuted mb-2">CHANNELS</h3>
         <div className="flex justify-between items-center text-[0.75rem] mb-1">
-          <div className="flex items-center"><div className="w-1 h-1 bg-success rounded-full mr-1.5" /><span className="text-textSecondary">Imgur</span></div>
-          <span className="text-textMuted">2m ago</span>
+          <div className="flex items-center">
+            <div className={`w-1 h-1 rounded-full mr-1.5 ${channels.imgur?.status === 'reachable' ? 'bg-success' : 'bg-error'}`} />
+            <span className="text-textSecondary">Imgur</span>
+          </div>
+          <span className="text-textMuted">{channels.imgur?.status === 'reachable' ? 'active' : 'down'}</span>
         </div>
         <div className="flex justify-between items-center text-[0.75rem] mb-2">
-          <div className="flex items-center"><div className="w-1 h-1 bg-success rounded-full mr-1.5" /><span className="text-textSecondary">GitHub Gist</span></div>
-          <span className="text-textMuted">1m ago</span>
+          <div className="flex items-center">
+            <div className={`w-1 h-1 rounded-full mr-1.5 ${channels.gist?.status === 'reachable' ? 'bg-success' : 'bg-error'}`} />
+            <span className="text-textSecondary">GitHub Gist</span>
+          </div>
+          <span className="text-textMuted">{channels.gist?.status === 'reachable' ? 'active' : 'down'}</span>
         </div>
         <div className="h-px bg-borderBase w-full my-1.5" />
         <span className="text-[0.75rem] text-textMuted">Cover traffic: active</span>

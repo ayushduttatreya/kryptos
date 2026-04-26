@@ -390,6 +390,45 @@ Tests:       18 passed, 18 total
 
 ---
 
+## Running with Docker (Recommended)
+
+### Prerequisites
+
+- Docker Desktop installed and running
+- Git
+
+### Steps
+
+1. Clone the repository
+2. `cp .env.example .env`
+3. Fill in `IMGUR_CLIENT_ID` and `GITHUB_TOKEN` in `.env`
+4. `./scripts/start.sh`
+5. Open http://localhost:3000
+6. Enter the Konami code: `↑ ↑ ↓ ↓ ← → ← → B A`
+
+### Useful Commands
+
+| Command | Description |
+| --- | --- |
+| View all logs | `docker compose logs -f` |
+| View backend logs | `docker compose logs -f backend` |
+| Check health | `./scripts/healthcheck.sh` |
+| Stop | `./scripts/stop.sh` |
+| Stop + wipe data | `docker compose down -v` |
+| Rebuild | `docker compose up --build` |
+
+### Development Mode
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
+
+- Frontend hot reload at http://localhost:5173
+- Backend hot reload at http://localhost:4000
+- Redis exposed at localhost:6379
+
+---
+
 ## The Research Contribution
 
 Kryptos demonstrates that decentralized steganographic covert channels are practically implementable using nothing more than modern web APIs, standard cryptographic libraries, and existing public internet infrastructure. Prior work in covert channel research has often assumed either a shared physical medium or a dedicated covert server. Kryptos eliminates both assumptions — the dead drop infrastructure is borrowed entirely from existing public platforms, and coordination happens through shared cryptographic derivation, not communication.

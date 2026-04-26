@@ -21,6 +21,9 @@ RUN npm ci --only=production
 # ──────────────────────────────────────────────
 FROM node:20-alpine AS production
 
+# Install wget for healthcheck
+RUN apk add --no-cache wget
+
 # Create non-root user
 RUN addgroup -g 1001 -S kryptos && \
     adduser -S kryptos -u 1001
