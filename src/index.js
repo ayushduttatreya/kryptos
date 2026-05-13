@@ -1,8 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const redis = require('redis');
-const axios = require('axios');
 const path = require('path');
+const { checkExternalServices } = require('./healthcheck');
 
 const app = express();
 app.use(express.json());
@@ -26,45 +26,17 @@ async function connectRedis() {
   }
 }
 
-// Cached external service health checks (60s TTL)
-let extHealth = { imgur: 'unknown', gist: 'unknown', lastCheck: 0 };
-
-async function checkExternalServices() {
-  const now = Date.now();
-  if (now - extHealth.lastCheck < 60000) return;
-
-  let imgurStatus = 'unreachable';
-  try {
-    await axios.head('https://api.imgur.com/3/credits', { timeout: 5000 });
-    imgurStatus = 'reachable';
-  } catch (_e) {
-    // Even a 401 means the service is up
-    imgurStatus = 'reachable';
-  }
-
-  let gistStatus = 'unreachable';
-  try {
-    await axios.head('https://api.github.com', { timeout: 5000 });
-    gistStatus = 'reachable';
-  } catch (_e) {
-    gistStatus = 'reachable';
-  }
-
-  extHealth = { imgur: imgurStatus, gist: gistStatus, lastCheck: now };
-}
-
 // Health endpoint — used by Docker healthcheck and frontend ChannelStatus
 app.get('/health', async (_req, res) => {
   try {
-    await checkExternalServices();
-    const redisStatus = redisConnected ? 'connected' : 'disconnected';
+    const health = await checkExternalServices();
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
       services: {
-        redis: redisStatus,
-        imgur: extHealth.imgur,
-        gist: extHealth.gist,
+        redis: redisConnected ? 'connected' : 'disconnected',
+        imgur: health.imgur,
+        gist: health.gist,
       },
       uptime: process.uptime(),
     });
@@ -164,10 +136,10 @@ app.post('/api/messages', async (req, res) => {
 // Get channel status
 app.get('/api/channels/status', async (_req, res) => {
   try {
-    await checkExternalServices();
+    const health = await checkExternalServices();
     res.json({
-      imgur: { status: extHealth.imgur, load: 0.3 },
-      gist: { status: extHealth.gist, load: 0.2 },
+      imgur: { status: health.imgur, load: 0.3 },
+      gist: { status: health.gist, load: 0.2 },
       redis: { status: redisConnected ? 'connected' : 'disconnected' },
     });
   } catch (err) {
