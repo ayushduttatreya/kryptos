@@ -53,3 +53,33 @@ export const getChannelsStatus = async () => {
     return null;
   }
 };
+
+export const createContact = async (contact) => {
+  try {
+    const res = await api.post('/contacts', contact);
+    return res.data;
+  } catch (error) {
+    console.error('createContact failed', error);
+    return null;
+  }
+};
+
+export const deleteContact = async (contactId) => {
+  try {
+    const res = await api.delete(`/contacts/${contactId}`);
+    return res.data;
+  } catch (error) {
+    console.error('deleteContact failed', error);
+    return null;
+  }
+};
+
+export const getStats = async (contactId) => {
+  try {
+    const res = await api.get(`/stats/${contactId}`);
+    return res.data;
+  } catch (error) {
+    console.error('getStats failed', error);
+    return null;
+  }
+};

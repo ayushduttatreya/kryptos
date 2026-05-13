@@ -1,9 +1,15 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Settings, QrCode, LogOut } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
+import { getIdentity } from '../../api/backend';
 
 const TopBar = () => {
   const { setMode, setGlitching } = useAppStore();
+  const [identity, setIdentity] = useState(null);
+
+  useEffect(() => {
+    getIdentity().then(id => { if (id) setIdentity(id); });
+  }, []);
 
   const handleExit = () => {
     setGlitching(true);
@@ -23,9 +29,9 @@ const TopBar = () => {
       </div>
 
       <div className="flex-1 flex justify-center text-textSecondary text-sm items-center">
-        <span className="font-medium">Alice</span>
+        <span className="font-medium">{identity?.handle ?? '···'}</span>
         <span className="mx-2 text-textMuted">·</span>
-        <span className="font-mono text-accent text-[0.8125rem]">a3f7c2b9</span>
+        <span className="font-mono text-accent text-[0.8125rem]">{identity?.fingerprint ?? '···'}</span>
       </div>
 
       <div className="flex items-center justify-end space-x-2 w-[240px]">
@@ -35,7 +41,7 @@ const TopBar = () => {
         <button className="p-1.5 text-textMuted hover:text-textPrimary hover:bg-bgElevated rounded transition-colors">
           <QrCode size={16} />
         </button>
-        <button 
+        <button
           onClick={handleExit}
           className="p-1.5 text-textMuted hover:text-textPrimary hover:bg-bgElevated rounded transition-colors ml-2"
         >

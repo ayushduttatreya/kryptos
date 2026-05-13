@@ -1,11 +1,12 @@
 # Dependencies
 node_modules/
-package-lock.json
+frontend/node_modules/
 
 # Environment variables
 .env
 .env.local
 .env.*.local
+!.env.example
 
 # IDE and editor
 .vscode/
@@ -13,7 +14,10 @@ package-lock.json
 *.swp
 *.swo
 *~
+
+# macOS
 .DS_Store
+**/.DS_Store
 
 # Logs
 logs/
@@ -24,15 +28,26 @@ yarn-error.log*
 
 # Test coverage
 coverage/
+frontend/coverage/
 .nyc_output/
 
 # Build and distribution
 dist/
 build/
+frontend/dist/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Docker volumes / local data
+redis-data/
 
 # OS files
 Thumbs.db
 
-#claude files
+# Claude project files
 CLAUDE.md
 SKILLS.md
+docs/superpowers/
+.claude/

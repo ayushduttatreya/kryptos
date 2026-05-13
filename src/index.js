@@ -6,6 +6,7 @@ const { checkExternalServices } = require('./healthcheck');
 const { send } = require('./core/send');
 const { receive } = require('./core/receive');
 const { loadOrGenerate, exportPublicKey } = require('./keystore');
+const { getCurrentRendezvousId } = require('./rendezvous');
 
 const app = express();
 app.use(express.json());
@@ -79,6 +80,99 @@ app.get('/api/contacts', async (_req, res) => {
   }
 });
 
+app.post('/api/contacts', async (req, res) => {
+  try {
+    const { name, publicKey, seed, githubUser } = req.body;
+    if (!name || !publicKey) {
+      return res.status(400).json({ error: 'name and publicKey are required' });
+    }
+    if (!/^[0-9a-fA-F]{64}$/.test(publicKey)) {
+      return res.status(400).json({ error: 'publicKey must be a 64-char hex string' });
+    }
+
+    let contacts = [];
+    if (redisConnected && redisClient) {
+      const data = await redisClient.get('contacts');
+      if (data) contacts = JSON.parse(data);
+    }
+
+    if (contacts.find(c => c.publicKey === publicKey)) {
+      return res.status(409).json({ error: 'Contact with this publicKey already exists' });
+    }
+
+    const contact = {
+      id: `contact-${Date.now()}`,
+      name,
+      publicKey,
+      fingerprint: publicKey.slice(0, 8),
+      seed: seed || null,
+      githubUser: githubUser || null,
+      lastSeen: Date.now(),
+    };
+
+    contacts.push(contact);
+    if (redisConnected && redisClient) {
+      await redisClient.setEx('contacts', 172800, JSON.stringify(contacts));
+    }
+    res.status(201).json(contact);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/contacts/:contactId', async (req, res) => {
+  try {
+    const { contactId } = req.params;
+    let contacts = [];
+    if (redisConnected && redisClient) {
+      const data = await redisClient.get('contacts');
+      if (data) contacts = JSON.parse(data);
+    }
+    const idx = contacts.findIndex(c => c.id === contactId);
+    if (idx === -1) return res.status(404).json({ error: 'Contact not found' });
+    contacts.splice(idx, 1);
+    if (redisConnected && redisClient) {
+      await redisClient.setEx('contacts', 172800, JSON.stringify(contacts));
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/stats/:contactId', async (req, res) => {
+  try {
+    const { contactId } = req.params;
+    const getInt = async (key) => {
+      if (!redisConnected || !redisClient) return 0;
+      const val = await redisClient.get(key);
+      return val ? parseInt(val, 10) : 0;
+    };
+
+    const [sent, recv, imgur, gist, ratchetRaw] = await Promise.all([
+      getInt(`stats:sent:${contactId}`),
+      getInt(`stats:recv:${contactId}`),
+      getInt(`stats:imgur:${contactId}`),
+      getInt(`stats:gist:${contactId}`),
+      redisConnected && redisClient ? redisClient.get(`stats:ratchet:${contactId}`) : Promise.resolve(null),
+    ]);
+
+    const total = imgur + gist;
+    const channelUsage = total === 0
+      ? { imgur: 0.5, gist: 0.5 }
+      : { imgur: imgur / total, gist: gist / total };
+
+    res.json({
+      sent,
+      received: recv,
+      channelUsage,
+      lastRatchet: ratchetRaw ? parseInt(ratchetRaw, 10) : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get messages for a contact
 app.get('/api/messages/:contactId', async (req, res) => {
   try {
@@ -108,10 +202,17 @@ app.get('/api/messages/:contactId', async (req, res) => {
             sent: false,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             timestamp: Date.now(),
+            meta: {
+              rendezvousId: getCurrentRendezvousId(seed, contactId),
+              shardsFound: 3,
+              channels: { imgur: 2, gist: 1 },
+            },
           };
           messages.push(inbound);
           if (redisConnected && redisClient) {
             await redisClient.setEx(`messages:${contactId}`, 172800, JSON.stringify(messages));
+            await redisClient.incr(`stats:recv:${contactId}`);
+            await redisClient.set(`stats:ratchet:${contactId}`, String(Date.now()));
           }
         }
       } catch (err) {
@@ -140,6 +241,7 @@ app.post('/api/messages', async (req, res) => {
       sent: true,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: Date.now(),
+      meta: null,
     };
 
     if (redisConnected && redisClient) {
@@ -159,6 +261,13 @@ app.post('/api/messages', async (req, res) => {
         carriers,
         imgurClientId: process.env.IMGUR_CLIENT_ID,
         githubToken: process.env.GITHUB_TOKEN,
+      }).then(async (receipts) => {
+        if (!redisConnected || !redisClient) return;
+        await redisClient.incr(`stats:sent:${contactId}`);
+        for (const r of receipts) {
+          if (r.channel === 'imgur') await redisClient.incr(`stats:imgur:${contactId}`);
+          else if (r.channel === 'gist') await redisClient.incr(`stats:gist:${contactId}`);
+        }
       }).catch((err) => console.error('Covert send failed:', err.message));
     }
 
@@ -183,8 +292,6 @@ app.get('/api/channels/status', async (_req, res) => {
 });
 
 async function main() {
-  await connectRedis();
-
   const sodium = require('libsodium-wrappers');
   await sodium.ready;
   nodeKeypair = await loadOrGenerate({ redisClient: redisConnected ? redisClient : null });
@@ -194,7 +301,14 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  console.error('Fatal startup error:', err);
-  process.exit(1);
-});
+// Connect to Redis eagerly so routes work without calling main()
+connectRedis();
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('Fatal startup error:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = { app };

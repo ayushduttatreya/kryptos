@@ -1,24 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import ContactCard from './ContactCard';
-import { getContacts, getChannelsStatus } from '../../api/backend';
+import { getContacts, getChannelsStatus, getIdentity } from '../../api/backend';
 
-const LeftPanel = ({ selectedContact, onSelectContact }) => {
+function getRendezvousInfo() {
+  const now = new Date();
+  const h = now.getUTCHours();
+  const m = now.getUTCMinutes();
+  const s = now.getUTCSeconds();
+  const secsRemaining = 3600 - (m * 60 + s);
+  const mm = String(Math.floor(secsRemaining / 60)).padStart(2, '0');
+  const ss = String(secsRemaining % 60).padStart(2, '0');
+  const pad = n => String(n).padStart(2, '0');
+  const label = `${pad(h)}:00 – ${pad((h + 1) % 24)}:00`;
+  return { countdown: `${mm}:${ss}`, label };
+}
+
+const LeftPanel = ({ selectedContact, onSelectContact, onOpenPairing, contactsVersion }) => {
   const [contacts, setContacts] = useState([]);
   const [channels, setChannels] = useState({ imgur: { status: 'unknown' }, gist: { status: 'unknown' } });
+  const [identity, setIdentity] = useState(null);
+  const [rendezvous, setRendezvous] = useState(getRendezvousInfo());
+
+  const fetchData = useCallback(async () => {
+    const [contactsData, channelsData, identityData] = await Promise.all([
+      getContacts(),
+      getChannelsStatus(),
+      getIdentity(),
+    ]);
+    setContacts(contactsData || []);
+    if (channelsData) setChannels(channelsData);
+    if (identityData) setIdentity(identityData);
+  }, []);
 
   useEffect(() => {
-    const fetchData = async () => {
-      const contactsData = await getContacts();
-      setContacts(contactsData);
-      const channelsData = await getChannelsStatus();
-      if (channelsData) {
-        setChannels(channelsData);
-      }
-    };
     fetchData();
-    // Poll every 30 seconds
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
+    const pollInterval = setInterval(fetchData, 30000);
+    return () => clearInterval(pollInterval);
+  }, [fetchData, contactsVersion]);
+
+  useEffect(() => {
+    const tick = setInterval(() => setRendezvous(getRendezvousInfo()), 1000);
+    return () => clearInterval(tick);
   }, []);
 
   const formatLastSeen = (timestamp) => {
@@ -31,15 +53,19 @@ const LeftPanel = ({ selectedContact, onSelectContact }) => {
     return 'Yesterday';
   };
 
+  const pubKeyDisplay = identity
+    ? `${identity.publicKey.slice(0, 10)}...${identity.publicKey.slice(-10)}`
+    : '···';
+
   return (
     <div className="w-[260px] bg-bgSecondary border-r border-borderBase flex flex-col shrink-0 h-full">
       <div className="h-[120px] p-4 flex flex-col justify-center border-b border-borderBase shrink-0">
         <h3 className="text-[0.875rem] font-semibold tracking-[0.08em] uppercase text-textMuted mb-2">YOUR NODE</h3>
         <div className="font-mono text-xl text-textPrimary tracking-[0.02em] cursor-pointer hover:text-accent transition-colors">
-          a3f7c2b9
+          {identity?.fingerprint ?? '···'}
         </div>
         <div className="text-[0.7rem] text-textMuted font-mono truncate mt-1">
-          048e9a2b5f...c7d8e9f0a1
+          {pubKeyDisplay}
         </div>
         <div className="flex items-center space-x-1.5 mt-3">
           <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse-subtle" />
@@ -49,9 +75,9 @@ const LeftPanel = ({ selectedContact, onSelectContact }) => {
 
       <div className="p-4 border-b border-borderBase shrink-0">
         <h3 className="text-[0.875rem] font-semibold tracking-[0.08em] uppercase text-textMuted mb-2">RENDEZVOUS WINDOW</h3>
-        <div className="font-mono text-textPrimary mb-2 text-sm">14:00 – 15:00</div>
+        <div className="font-mono text-textPrimary mb-2 text-sm">{rendezvous.label}</div>
         <div className="font-mono text-2xl text-textSecondary">
-          42:15
+          {rendezvous.countdown}
         </div>
       </div>
 
@@ -59,13 +85,16 @@ const LeftPanel = ({ selectedContact, onSelectContact }) => {
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-[0.875rem] font-semibold tracking-[0.08em] uppercase text-textMuted">CONTACTS</h3>
         </div>
-        <button className="w-full bg-transparent border border-borderBase text-textSecondary text-sm py-1.5 rounded-sm hover:bg-bgElevated transition-colors mb-4 shrink-0">
+        <button
+          onClick={() => onOpenPairing('scan')}
+          className="w-full bg-transparent border border-borderBase text-textSecondary text-sm py-1.5 rounded-sm hover:bg-bgElevated transition-colors mb-4 shrink-0"
+        >
           + pair new node
         </button>
-        
+
         <div className="space-y-2 flex-1">
           {contacts.map((contact) => (
-            <ContactCard 
+            <ContactCard
               key={contact.id}
               active={selectedContact?.id === contact.id}
               name={contact.name}

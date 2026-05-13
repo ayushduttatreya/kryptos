@@ -61,11 +61,12 @@ const CenterPanel = ({ selectedContact }) => {
           </div>
         ) : (
           messages.map((msg) => (
-            <MessageCard 
+            <MessageCard
               key={msg.id}
               sent={msg.sent}
               text={msg.text}
               time={msg.time}
+              meta={msg.meta}
             />
           ))
         )}
