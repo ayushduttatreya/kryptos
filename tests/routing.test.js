@@ -1,108 +1,56 @@
-jest.mock('axios');
-const axios = require('axios');
 const sodium = require('libsodium-wrappers');
 const { route } = require('../src/routing/aiRouter');
 const { generate: generateCoverTraffic, FAKE_RATIO } = require('../src/routing/coverTraffic');
 
+describe('L3 aiRouter (local CSPRNG)', () => {
+  test('returns one assignment per shard', () => {
+    const shards = [
+      { id: 0, size: 100, urgency: true },
+      { id: 1, size: 100, urgency: false },
+      { id: 2, size: 100, urgency: false },
+    ];
+    const result = route(shards);
+    expect(result).toHaveLength(3);
+    result.forEach((a, i) => {
+      expect(a.shardId).toBe(String(i));
+      expect(['imgur', 'gist']).toContain(a.channel);
+      expect(typeof a.delayMs).toBe('number');
+      expect(a.delayMs).toBeGreaterThanOrEqual(500);
+      expect(a.delayMs).toBeLessThanOrEqual(8000);
+    });
+  });
+
+  test('distributes across both channels over 100 calls', () => {
+    const shards = [{ id: 0, size: 64, urgency: false }];
+    const channels = new Set();
+    for (let i = 0; i < 100; i++) {
+      channels.add(route(shards)[0].channel);
+    }
+    expect(channels.size).toBe(2);
+  });
+
+  test('assigns delayMs in 500–8000 range', () => {
+    const shards = Array.from({ length: 50 }, (_, i) => ({ id: i, size: 64, urgency: false }));
+    const results = route(shards);
+    results.forEach(a => {
+      expect(a.delayMs).toBeGreaterThanOrEqual(500);
+      expect(a.delayMs).toBeLessThanOrEqual(8000);
+    });
+  });
+
+  test('throws on empty shards', () => {
+    expect(() => route([])).toThrow(/non-empty/);
+  });
+
+  test('is synchronous — no Promise returned', () => {
+    const result = route([{ id: 0, size: 64, urgency: false }]);
+    expect(result).not.toBeInstanceOf(Promise);
+  });
+});
+
 describe('L3 AI Routing Engine', () => {
   beforeAll(async () => {
     await sodium.ready;
-  });
-  describe('aiRouter.route', () => {
-    test('returns parsed assignments from OpenRouter', async () => {
-      axios.post.mockResolvedValueOnce({
-        data: {
-          choices: [
-            {
-              message: {
-                content: JSON.stringify([
-                  { shardId: 1, channel: 'imgur', delayMs: 0 },
-                  { shardId: 2, channel: 'gist', delayMs: 5000 },
-                ]),
-              },
-            },
-          ],
-        },
-      });
-
-      const shards = [
-        { id: 1, size: 100, urgency: true },
-        { id: 2, size: 200, urgency: false },
-      ];
-      const status = { imgur: { load: 0.2 }, gist: { load: 0.1 } };
-      const result = await route(shards, status, 'fake-api-key');
-
-      expect(result).toHaveLength(2);
-      expect(result[0]).toEqual({ shardId: '1', channel: 'imgur', delayMs: 0 });
-      expect(result[1]).toEqual({ shardId: '2', channel: 'gist', delayMs: 5000 });
-    });
-
-    test('handles markdown-wrapped JSON', async () => {
-      axios.post.mockResolvedValueOnce({
-        data: {
-          choices: [
-            {
-              message: {
-                content: '```json\n[{"shardId":"a","channel":"imgur","delayMs":100}]\n```',
-              },
-            },
-          ],
-        },
-      });
-
-      const result = await route([{ id: 'a' }], {}, 'key');
-      expect(result).toEqual([{ shardId: 'a', channel: 'imgur', delayMs: 100 }]);
-    });
-
-    test('handles nested object response', async () => {
-      axios.post.mockResolvedValueOnce({
-        data: {
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  assignments: [{ shardId: 5, channel: 'gist', delayMs: 200 }],
-                }),
-              },
-            },
-          ],
-        },
-      });
-
-      const result = await route([{ id: 5 }], {}, 'key');
-      expect(result).toEqual([{ shardId: '5', channel: 'gist', delayMs: 200 }]);
-    });
-
-    test('throws on missing API key', async () => {
-      await expect(route([{ id: 1 }], {}, '')).rejects.toThrow(/API key is required/);
-    });
-
-    test('throws on empty shards', async () => {
-      await expect(route([], {}, 'key')).rejects.toThrow(/non-empty/);
-    });
-
-    test('throws on unparseable AI response', async () => {
-      axios.post.mockResolvedValueOnce({
-        data: {
-          choices: [{ message: { content: 'not-json-at-all' } }],
-        },
-      });
-      await expect(route([{ id: 1 }], {}, 'key')).rejects.toThrow(/JSON/);
-    });
-
-    test('throws on non-array AI response', async () => {
-      axios.post.mockResolvedValueOnce({
-        data: {
-          choices: [{ message: { content: '{"foo":"bar"}' } }],
-        },
-      });
-      await expect(route([{ id: 1 }], {}, 'key')).rejects.toThrow(/valid array/);
-    });
-
-    test('throws on empty OpenRouter response', async () => {
-      axios.post.mockResolvedValueOnce({ data: { choices: [] } });
-      await expect(route([{ id: 1 }], {}, 'key')).rejects.toThrow(/empty response/);
-    });
   });
 
   describe('coverTraffic.generate', () => {

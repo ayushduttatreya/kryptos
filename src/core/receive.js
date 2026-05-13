@@ -1,6 +1,8 @@
+const sodium = require('libsodium-wrappers');
 const { keyExchange, encrypt, shard, integrity } = require('../crypto');
 const { getCurrentRendezvousId, getRendezvousIdForDate } = require('../rendezvous');
 const { lsb, whitespace } = require('../stego');
+const { advance, saveKey } = require('../ratchet');
 
 /**
  * @module receive
@@ -23,7 +25,7 @@ const POLL_HOURS = 2; // How many past/future hours to poll
  * @throws {Error} On pipeline failure.
  */
 async function receive(opts) {
-  const { seed, imgurClientId, githubToken, githubUser, overrides = {} } = opts;
+  const { seed, contactId = '', imgurClientId, githubToken, githubUser, overrides = {}, seenHashes } = opts;
 
   if (!seed) {
     throw new Error('receive requires seed');
@@ -34,10 +36,10 @@ async function receive(opts) {
   const windows = [];
   for (let h = -POLL_HOURS; h <= POLL_HOURS; h++) {
     const d = new Date(now.getTime() + h * 3600 * 1000);
-    windows.push(getRendezvousIdForDate(seed, d));
+    windows.push(getRendezvousIdForDate(seed, d, contactId));
   }
   // Also include the exact current hour
-  windows.push(getCurrentRendezvousId(seed));
+  windows.push(getCurrentRendezvousId(seed, contactId));
   const uniqueWindows = [...new Set(windows)];
 
   // 2. Poll all channels for each rendezvous window
@@ -107,6 +109,13 @@ async function receive(opts) {
     const hash = packet.slice(lastPipe + 1);
     if (!shardStr || !hash) continue;
     if (integrity.verify(shardStr, hash)) {
+      if (seenHashes) {
+        const packetHash = Buffer.from(
+          sodium.crypto_generichash(16, sodium.from_string(shardStr))
+        ).toString('hex');
+        if (seenHashes.has(packetHash)) continue;
+        seenHashes.add(packetHash);
+      }
       validShards.push(shardStr);
     }
   }
@@ -150,6 +159,16 @@ async function receive(opts) {
 
   // 8. Decrypt
   const plaintext = encrypt.decrypt(ciphertext, sharedSecret);
+
+  // Advance ratchet after successful decrypt
+  if (opts.contactId && (opts.redisClient || opts.ratchetStore)) {
+    const nextKey = await advance(sharedSecret);
+    await saveKey(opts.contactId, nextKey, {
+      store: opts.ratchetStore || {},
+      redisClient: opts.redisClient,
+    });
+  }
+
   return plaintext;
 }
 

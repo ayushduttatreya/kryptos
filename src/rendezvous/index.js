@@ -28,9 +28,9 @@ function getRendezvousWindow() {
  * @param {string} seed - The out-of-band shared seed phrase.
  * @returns {string}    - 32-char hex rendezvous_id for the current hour.
  */
-function getCurrentRendezvousId(seed) {
+function getCurrentRendezvousId(seed, contactId = '') {
   const { date, hour } = getRendezvousWindow();
-  return derive(seed, date, hour);
+  return derive(seed, date, hour, contactId);
 }
 
 /**
@@ -41,12 +41,12 @@ function getCurrentRendezvousId(seed) {
  * @param {Date}   when - Arbitrary Date object.
  * @returns {string}    - 32-char hex rendezvous_id.
  */
-function getRendezvousIdForDate(seed, when) {
+function getRendezvousIdForDate(seed, when, contactId = '') {
   const year = when.getUTCFullYear();
   const month = String(when.getUTCMonth() + 1).padStart(2, '0');
   const day = String(when.getUTCDate()).padStart(2, '0');
   const hour = when.getUTCHours();
-  return derive(seed, `${year}-${month}-${day}`, hour);
+  return derive(seed, `${year}-${month}-${day}`, hour, contactId);
 }
 
 module.exports = {

@@ -183,4 +183,37 @@ describe('L6 Core Pipeline (integration)', () => {
 
     expect(recovered).toBe(message);
   }, 30000);
+
+  test('does not re-deliver a message already in seenHashes', async () => {
+    const seed = 'dedup-seed-111';
+    const message = 'Do not deliver me twice.';
+    const carriers = await makeCarriers();
+    const overrides = buildOverrides();
+
+    await send({ message, seed, carriers, overrides });
+
+    const seenHashes = new Set();
+
+    const first = await receive({
+      seed,
+      overrides: {
+        pollImgur: overrides.pollImgur,
+        pollGist: overrides.pollGist,
+        fetchImage: overrides.fetchImage,
+      },
+      seenHashes,
+    });
+    expect(first).toBe(message);
+
+    const second = await receive({
+      seed,
+      overrides: {
+        pollImgur: overrides.pollImgur,
+        pollGist: overrides.pollGist,
+        fetchImage: overrides.fetchImage,
+      },
+      seenHashes,
+    });
+    expect(second).toBeNull();
+  }, 30000);
 });

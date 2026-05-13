@@ -3,6 +3,9 @@ const express = require('express');
 const redis = require('redis');
 const path = require('path');
 const { checkExternalServices } = require('./healthcheck');
+const { send } = require('./core/send');
+const { receive } = require('./core/receive');
+const { loadOrGenerate, exportPublicKey } = require('./keystore');
 
 const app = express();
 app.use(express.json());
@@ -13,6 +16,7 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
 // Redis client
 let redisClient = null;
 let redisConnected = false;
+let nodeKeypair = null;
 
 async function connectRedis() {
   try {
@@ -50,13 +54,14 @@ app.get('/api/status', (_req, res) => {
   res.json({ backend: true, version: '1.0.0' });
 });
 
-// Get identity (stub - will be derived from seed in production)
+// Get identity
 app.get('/api/identity', (_req, res) => {
+  if (!nodeKeypair) return res.status(503).json({ error: 'Keypair not ready' });
   res.json({
-    id: 'user-1',
-    handle: 'Alice',
-    fingerprint: 'a3f7c2b9',
-    publicKey: 'stub-public-key',
+    id: 'node-self',
+    handle: process.env.NODE_HANDLE || 'Node',
+    fingerprint: exportPublicKey(nodeKeypair).slice(0, 8),
+    publicKey: exportPublicKey(nodeKeypair),
   });
 });
 
@@ -68,13 +73,6 @@ app.get('/api/contacts', async (_req, res) => {
       const data = await redisClient.get('contacts');
       if (data) contacts = JSON.parse(data);
     }
-    // Return stub data if no contacts in Redis
-    if (contacts.length === 0) {
-      contacts = [
-        { id: 'contact-1', name: 'Bob', fingerprint: 'b9e4d2a1', lastSeen: Date.now() - 120000 },
-        { id: 'contact-2', name: 'Charlie', fingerprint: 'c8f3a7e2', lastSeen: Date.now() - 3600000 },
-      ];
-    }
     res.json(contacts);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -85,18 +83,42 @@ app.get('/api/contacts', async (_req, res) => {
 app.get('/api/messages/:contactId', async (req, res) => {
   try {
     const { contactId } = req.params;
+    const { seed } = req.query;
+
     let messages = [];
     if (redisConnected && redisClient) {
       const data = await redisClient.get(`messages:${contactId}`);
       if (data) messages = JSON.parse(data);
     }
-    // Return stub messages if none in Redis
-    if (messages.length === 0) {
-      messages = [
-        { id: 'msg-1', contactId, text: 'The package has been successfully embedded. Keys are in the standard location.', sent: false, time: '14:35', timestamp: Date.now() - 300000 },
-        { id: 'msg-2', contactId, text: "ok I'll check the drop", sent: true, time: '14:36', timestamp: Date.now() - 240000 },
-      ];
+
+    if (seed && (process.env.IMGUR_CLIENT_ID || process.env.GITHUB_TOKEN)) {
+      try {
+        const plaintext = await receive({
+          seed,
+          contactId,
+          imgurClientId: process.env.IMGUR_CLIENT_ID,
+          githubToken: process.env.GITHUB_TOKEN,
+          githubUser: process.env.GITHUB_USER,
+        });
+        if (plaintext) {
+          const inbound = {
+            id: `msg-recv-${Date.now()}`,
+            contactId,
+            text: plaintext,
+            sent: false,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            timestamp: Date.now(),
+          };
+          messages.push(inbound);
+          if (redisConnected && redisClient) {
+            await redisClient.setEx(`messages:${contactId}`, 172800, JSON.stringify(messages));
+          }
+        }
+      } catch (err) {
+        console.error('Covert receive failed:', err.message);
+      }
     }
+
     res.json(messages);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -106,10 +128,11 @@ app.get('/api/messages/:contactId', async (req, res) => {
 // Send a message
 app.post('/api/messages', async (req, res) => {
   try {
-    const { contactId, text, priority = false } = req.body;
+    const { contactId, text, seed, carriers } = req.body;
     if (!contactId || !text) {
       return res.status(400).json({ error: 'contactId and text are required' });
     }
+
     const message = {
       id: `msg-${Date.now()}`,
       contactId,
@@ -117,16 +140,28 @@ app.post('/api/messages', async (req, res) => {
       sent: true,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: Date.now(),
-      priority,
     };
-    // Store in Redis if connected
+
     if (redisConnected && redisClient) {
-      let messages = [];
-      const data = await redisClient.get(`messages:${contactId}`);
-      if (data) messages = JSON.parse(data);
+      const key = `messages:${contactId}`;
+      const data = await redisClient.get(key);
+      const messages = data ? JSON.parse(data) : [];
       messages.push(message);
-      await redisClient.set(`messages:${contactId}`, JSON.stringify(messages));
+      await redisClient.setEx(key, 172800, JSON.stringify(messages));
     }
+
+    if (seed && carriers && carriers.length > 0 &&
+        (process.env.IMGUR_CLIENT_ID || process.env.GITHUB_TOKEN)) {
+      send({
+        message: text,
+        seed,
+        contactId,
+        carriers,
+        imgurClientId: process.env.IMGUR_CLIENT_ID,
+        githubToken: process.env.GITHUB_TOKEN,
+      }).catch((err) => console.error('Covert send failed:', err.message));
+    }
+
     res.json({ success: true, message });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -149,6 +184,11 @@ app.get('/api/channels/status', async (_req, res) => {
 
 async function main() {
   await connectRedis();
+
+  const sodium = require('libsodium-wrappers');
+  await sodium.ready;
+  nodeKeypair = await loadOrGenerate({ redisClient: redisConnected ? redisClient : null });
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`KRYPTOS backend listening on port ${PORT}`);
   });

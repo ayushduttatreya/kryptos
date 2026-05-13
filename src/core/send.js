@@ -20,7 +20,6 @@ const { generate: generateCoverTraffic } = require('../routing/coverTraffic');
  * @param {string} opts.seed          - Shared seed phrase.
  * @param {Array<Object>} opts.carriers - Stego carriers:
  *   { type:'imgur', buffer:Buffer } or { type:'gist', text:string }.
- * @param {string} opts.openrouterKey - OpenRouter API key (from env).
  * @param {string} opts.imgurClientId - Imgur Client ID (from env).
  * @param {string} opts.githubToken   - GitHub token (from env).
  * @param {Object} [opts.overrides]   - Test overrides for router/channels.
@@ -28,7 +27,7 @@ const { generate: generateCoverTraffic } = require('../routing/coverTraffic');
  * @throws {Error} On pipeline failure.
  */
 async function send(opts) {
-  const { message, seed, carriers, openrouterKey, imgurClientId, githubToken, overrides = {} } = opts;
+  const { message, seed, carriers, imgurClientId, githubToken, contactId = '', overrides = {} } = opts;
 
   if (!message || !seed || !carriers || carriers.length === 0) {
     throw new Error('send requires message, seed, and at least one carrier');
@@ -65,7 +64,7 @@ async function send(opts) {
   }));
 
   // 8. Rendezvous tag
-  const rendezvousId = getCurrentRendezvousId(seed);
+  const rendezvousId = getCurrentRendezvousId(seed, contactId);
   const taggedShares = hashedShares.map((hs) => ({
     ...hs,
     rendezvousId,
@@ -78,24 +77,14 @@ async function send(opts) {
     ...fakes.map((f) => ({ ...f, rendezvousId, hash: integrity.hash(f.shard) })),
   ];
 
-  // 10. AI routing
+  // 10. Route shards to channels (local CSPRNG, no network call)
   let assignments;
   if (overrides.router) {
     assignments = overrides.router(allShards);
-  } else if (openrouterKey) {
-    const channelStatus = { imgur: { load: 0.3 }, gist: { load: 0.2 } };
-    assignments = await route(
-      allShards.map((s, idx) => ({ id: idx, size: s.shard.length, urgency: !s.isFake })),
-      channelStatus,
-      openrouterKey
-    );
   } else {
-    // Fallback deterministic round-robin when no AI key
-    assignments = allShards.map((_, idx) => ({
-      shardId: String(idx),
-      channel: idx % 2 === 0 ? 'imgur' : 'gist',
-      delayMs: 0,
-    }));
+    assignments = route(
+      allShards.map((s, idx) => ({ id: idx, size: s.shard.length, urgency: !s.isFake }))
+    );
   }
 
   // 11. Embed each shard into its assigned carrier and upload
@@ -103,6 +92,11 @@ async function send(opts) {
   for (let i = 0; i < allShards.length; i++) {
     const assignment = assignments.find((a) => a.shardId === String(i));
     if (!assignment) continue;
+
+    // Stagger uploads to break burst correlation
+    if (assignment.delayMs > 0 && !overrides.router) {
+      await new Promise((resolve) => setTimeout(resolve, assignment.delayMs));
+    }
 
     const carrier = carriers[i % carriers.length];
     const shardPacket = `${allShards[i].shard}|${allShards[i].hash}`;

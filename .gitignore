@@ -32,3 +32,7 @@ build/
 
 # OS files
 Thumbs.db
+
+#claude files
+CLAUDE.md
+SKILLS.md

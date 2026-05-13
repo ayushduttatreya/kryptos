@@ -31,7 +31,7 @@ function bytesToHex(bytes) {
  * @param {number} hour  - Hour of day, 0–23 (UTC).
  * @returns {string}     - 32-char hex rendezvous_id.
  */
-function derive(seed, date, hour) {
+function derive(seed, date, hour, contactId = '') {
   if (typeof seed !== 'string' || seed.length === 0) {
     throw new Error('Seed must be a non-empty string');
   }
@@ -43,12 +43,13 @@ function derive(seed, date, hour) {
   }
 
   const seedBytes = sodium.from_string(seed);
-  const prk = sodium.crypto_generichash(32, seedBytes);           // extract
+  const prk = sodium.crypto_generichash(32, seedBytes);
 
-  const context = sodium.from_string(`${date}|${hour}`);
-  const idBytes = sodium.crypto_generichash(16, context, prk);    // expand
+  // Include contactId in context so each peer-pair has an independent channel
+  const context = sodium.from_string(`${date}|${hour}|${contactId}`);
+  const idBytes = sodium.crypto_generichash(16, context, prk);
 
-  return bytesToHex(idBytes); // 32 hex chars
+  return bytesToHex(idBytes);
 }
 
 module.exports = { derive };

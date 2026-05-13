@@ -105,4 +105,25 @@ describe('L4 Rendezvous Protocol', () => {
       expect(aliceId.length).toBe(32);
     });
   });
+
+  describe('per-contact isolation', () => {
+    test('same seed + different contactId → different rendezvous IDs', () => {
+      const id1 = derive('seed', '2026-05-13', 10, 'contact-bob');
+      const id2 = derive('seed', '2026-05-13', 10, 'contact-charlie');
+      expect(id1).not.toBe(id2);
+    });
+
+    test('omitting contactId is backward-compatible', () => {
+      const id1 = derive('seed', '2026-05-13', 10);
+      const id2 = derive('seed', '2026-05-13', 10, '');
+      expect(id1).toBe(id2);
+    });
+
+    test('getCurrentRendezvousId accepts optional contactId', () => {
+      const id1 = getCurrentRendezvousId('seed', 'bob');
+      const id2 = getCurrentRendezvousId('seed', 'charlie');
+      expect(id1).not.toBe(id2);
+      expect(id1.length).toBe(32);
+    });
+  });
 });
