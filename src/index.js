@@ -7,6 +7,8 @@ const { send } = require('./core/send');
 const { receive } = require('./core/receive');
 const { loadOrGenerate, exportPublicKey } = require('./keystore');
 const { getCurrentRendezvousId } = require('./rendezvous');
+const poller = require('./poller');
+const contactSeenHashes = new Map();
 
 const app = express();
 app.use(express.json());
@@ -18,6 +20,11 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
 let redisClient = null;
 let redisConnected = false;
 let nodeKeypair = null;
+
+function sanitizeId(id) {
+  if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(id)) return null;
+  return id;
+}
 
 async function connectRedis() {
   try {
@@ -177,49 +184,11 @@ app.get('/api/stats/:contactId', async (req, res) => {
 app.get('/api/messages/:contactId', async (req, res) => {
   try {
     const { contactId } = req.params;
-    const { seed } = req.query;
-
     let messages = [];
     if (redisConnected && redisClient) {
       const data = await redisClient.get(`messages:${contactId}`);
       if (data) messages = JSON.parse(data);
     }
-
-    if (seed && (process.env.IMGUR_CLIENT_ID || process.env.GITHUB_TOKEN)) {
-      try {
-        const plaintext = await receive({
-          seed,
-          contactId,
-          imgurClientId: process.env.IMGUR_CLIENT_ID,
-          githubToken: process.env.GITHUB_TOKEN,
-          githubUser: process.env.GITHUB_USER,
-        });
-        if (plaintext) {
-          const inbound = {
-            id: `msg-recv-${Date.now()}`,
-            contactId,
-            text: plaintext,
-            sent: false,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            timestamp: Date.now(),
-            meta: {
-              rendezvousId: getCurrentRendezvousId(seed, contactId),
-              shardsFound: 3,
-              channels: { imgur: 2, gist: 1 },
-            },
-          };
-          messages.push(inbound);
-          if (redisConnected && redisClient) {
-            await redisClient.setEx(`messages:${contactId}`, 172800, JSON.stringify(messages));
-            await redisClient.incr(`stats:recv:${contactId}`);
-            await redisClient.set(`stats:ratchet:${contactId}`, String(Date.now()));
-          }
-        }
-      } catch (err) {
-        console.error('Covert receive failed:', err.message);
-      }
-    }
-
     res.json(messages);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -291,10 +260,31 @@ app.get('/api/channels/status', async (_req, res) => {
   }
 });
 
+app.post('/api/poll/start', (req, res) => {
+  const contactId = sanitizeId(req.body.contactId);
+  if (!contactId) return res.status(400).json({ error: 'Invalid contactId' });
+  poller.register(contactId);
+  res.json({ success: true });
+});
+
+app.post('/api/poll/stop', (req, res) => {
+  const contactId = sanitizeId(req.body.contactId);
+  if (!contactId) return res.status(400).json({ error: 'Invalid contactId' });
+  poller.deregister(contactId);
+  res.json({ success: true });
+});
+
 async function main() {
   const sodium = require('libsodium-wrappers');
   await sodium.ready;
   nodeKeypair = await loadOrGenerate({ redisClient: redisConnected ? redisClient : null });
+
+  const getContactsFn = async () => {
+    if (!redisConnected || !redisClient) return [];
+    const data = await redisClient.get('contacts');
+    return data ? JSON.parse(data) : [];
+  };
+  poller.init(redisClient, getContactsFn, contactSeenHashes);
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`KRYPTOS backend listening on port ${PORT}`);

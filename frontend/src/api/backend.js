@@ -83,3 +83,23 @@ export const getStats = async (contactId) => {
     return null;
   }
 };
+
+export const startPoll = async (contactId) => {
+  try {
+    const res = await api.post('/poll/start', { contactId });
+    return res.data;
+  } catch (error) {
+    console.error('startPoll failed', error);
+    return null;
+  }
+};
+
+export const stopPoll = async (contactId) => {
+  try {
+    const res = await api.post('/poll/stop', { contactId });
+    return res.data;
+  } catch (error) {
+    console.error('stopPoll failed', error);
+    return null;
+  }
+};

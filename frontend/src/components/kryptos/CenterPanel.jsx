@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import MessageCard from './MessageCard';
 import ComposeArea from './ComposeArea';
-import { getMessages, sendMessage } from '../../api/backend';
+import { getMessages, sendMessage, startPoll, stopPoll } from '../../api/backend';
 
 const CenterPanel = ({ selectedContact }) => {
   const [messages, setMessages] = useState([]);
@@ -9,18 +9,23 @@ const CenterPanel = ({ selectedContact }) => {
 
   useEffect(() => {
     if (!selectedContact) return;
-    
+
+    startPoll(selectedContact.id);
+
     const fetchMessages = async () => {
       setLoading(true);
       const data = await getMessages(selectedContact.id);
       setMessages(data);
       setLoading(false);
     };
-    
+
     fetchMessages();
-    // Poll for new messages every 10 seconds
     const interval = setInterval(fetchMessages, 10000);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearInterval(interval);
+      stopPoll(selectedContact.id);
+    };
   }, [selectedContact]);
 
   const handleSend = async (text, priority = false) => {

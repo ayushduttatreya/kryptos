@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import ContactCard from './ContactCard';
-import { getContacts, getChannelsStatus, getIdentity } from '../../api/backend';
+import { getContacts, getChannelsStatus, getIdentity, startPoll, stopPoll } from '../../api/backend';
 
 function getRendezvousInfo() {
   const now = new Date();
@@ -20,6 +20,7 @@ const LeftPanel = ({ selectedContact, onSelectContact, onOpenPairing, contactsVe
   const [channels, setChannels] = useState({ imgur: { status: 'unknown' }, gist: { status: 'unknown' } });
   const [identity, setIdentity] = useState(null);
   const [rendezvous, setRendezvous] = useState(getRendezvousInfo());
+  const contactsRef = React.useRef([]);
 
   const fetchData = useCallback(async () => {
     const [contactsData, channelsData, identityData] = await Promise.all([
@@ -27,7 +28,10 @@ const LeftPanel = ({ selectedContact, onSelectContact, onOpenPairing, contactsVe
       getChannelsStatus(),
       getIdentity(),
     ]);
-    setContacts(contactsData || []);
+    const loaded = contactsData || [];
+    setContacts(loaded);
+    contactsRef.current = loaded;
+    loaded.forEach(c => startPoll(c.id));
     if (channelsData) setChannels(channelsData);
     if (identityData) setIdentity(identityData);
   }, []);
@@ -35,7 +39,10 @@ const LeftPanel = ({ selectedContact, onSelectContact, onOpenPairing, contactsVe
   useEffect(() => {
     fetchData();
     const pollInterval = setInterval(fetchData, 30000);
-    return () => clearInterval(pollInterval);
+    return () => {
+      clearInterval(pollInterval);
+      contactsRef.current.forEach(c => stopPoll(c.id));
+    };
   }, [fetchData, contactsVersion]);
 
   useEffect(() => {

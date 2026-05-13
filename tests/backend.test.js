@@ -248,3 +248,255 @@ describe('GET /api/stats/:contactId', () => {
     expect(res.body.channelUsage).toEqual({ imgur: 0.5, gist: 0.5 });
   });
 });
+
+describe('src/poller.js', () => {
+  let poller;
+  let mockRedis;
+  let mockReceive;
+  let mockGetContacts;
+
+  beforeEach(() => {
+    jest.resetModules();
+    mockReceive = jest.fn().mockResolvedValue(null);
+    jest.mock('../src/core/receive', () => ({ receive: mockReceive }));
+    jest.mock('../src/rendezvous', () => ({
+      getCurrentRendezvousId: jest.fn().mockReturnValue('aabbccdd'),
+    }));
+
+    mockGetContacts = jest.fn().mockResolvedValue([
+      { id: 'contact-abc', seed: 'test-seed', githubUser: 'alice' },
+    ]);
+    mockRedis = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue('OK'),
+      setEx: jest.fn().mockResolvedValue('OK'),
+      incr: jest.fn().mockResolvedValue(1),
+      rPush: jest.fn().mockResolvedValue(1),
+      lTrim: jest.fn().mockResolvedValue('OK'),
+      expire: jest.fn().mockResolvedValue(1),
+    };
+
+    poller = require('../src/poller');
+    poller.init(mockRedis, mockGetContacts, new Map());
+  });
+
+  afterEach(() => {
+    poller.shutdown();
+  });
+
+  test('register adds contact to active set', () => {
+    poller.register('contact-abc');
+    expect(poller.isActive('contact-abc')).toBe(true);
+  });
+
+  test('deregister removes contact from active set', () => {
+    poller.register('contact-abc');
+    poller.deregister('contact-abc');
+    expect(poller.isActive('contact-abc')).toBe(false);
+  });
+
+  test('deregister is idempotent for unknown contactId', () => {
+    expect(() => poller.deregister('never-registered')).not.toThrow();
+  });
+
+  test('pollContact calls receive() with correct args', async () => {
+    poller.register('contact-abc');
+    await poller.pollContact('contact-abc');
+    expect(mockReceive).toHaveBeenCalledWith(expect.objectContaining({
+      seed: 'test-seed',
+      contactId: 'contact-abc',
+    }));
+  });
+
+  test('pollContact skips contact with no seed', async () => {
+    mockGetContacts.mockResolvedValueOnce([
+      { id: 'contact-abc', seed: null },
+    ]);
+    poller.register('contact-abc');
+    await poller.pollContact('contact-abc');
+    expect(mockReceive).not.toHaveBeenCalled();
+  });
+
+  test('pollContact saves inbound message to Redis when plaintext received', async () => {
+    mockReceive.mockResolvedValueOnce('hello world');
+    poller.register('contact-abc');
+    await poller.pollContact('contact-abc');
+    expect(mockRedis.get).toHaveBeenCalledWith('messages:contact-abc');
+    expect(mockRedis.get.mock.invocationCallOrder[0])
+      .toBeLessThan(mockRedis.setEx.mock.invocationCallOrder[0]);
+    expect(mockRedis.setEx).toHaveBeenCalledWith(
+      'messages:contact-abc',
+      172800,
+      expect.any(String)
+    );
+    const saved = JSON.parse(mockRedis.setEx.mock.calls[0][2]);
+    expect(Array.isArray(saved)).toBe(true);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].text).toBe('hello world');
+    expect(saved[0].sent).toBe(false);
+  });
+
+  test('inactivity timeout deregisters contact', async () => {
+    jest.useFakeTimers();
+    poller.register('contact-abc');
+    poller._setLastActivity('contact-abc', Date.now() - 11 * 60 * 1000);
+    await poller.runTick();
+    expect(poller.isActive('contact-abc')).toBe(false);
+    jest.useRealTimers();
+  });
+
+  test('tick skips contacts not yet due for polling', async () => {
+    poller.register('contact-abc');
+    poller._setLastPollAt('contact-abc', Date.now());
+    await poller.runTick();
+    expect(mockReceive).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/poll/start', () => {
+  let appModule;
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.mock('../src/poller', () => ({
+      init: jest.fn(),
+      register: jest.fn(),
+      deregister: jest.fn(),
+      isActive: jest.fn().mockReturnValue(false),
+      shutdown: jest.fn(),
+    }));
+    jest.mock('redis', () => ({
+      createClient: () => ({
+        on: jest.fn(),
+        connect: jest.fn().mockResolvedValue(undefined),
+        get: jest.fn().mockResolvedValue(null),
+        set: jest.fn().mockResolvedValue('OK'),
+        setEx: jest.fn().mockResolvedValue('OK'),
+        hGetAll: jest.fn().mockResolvedValue({}),
+      }),
+    }));
+    jest.mock('libsodium-wrappers', () => ({
+      ready: Promise.resolve(),
+      crypto_box_keypair: () => ({ publicKey: new Uint8Array(32), privateKey: new Uint8Array(32) }),
+      from_string: (s) => Buffer.from(s),
+      crypto_generichash: () => new Uint8Array(32),
+      crypto_scalarmult_base: () => new Uint8Array(32),
+    }));
+    appModule = require('../src/index');
+  });
+
+  test('returns 200 and calls poller.register', async () => {
+    const pollerMock = require('../src/poller');
+    const res = await request(appModule.app)
+      .post('/api/poll/start')
+      .send({ contactId: 'contact-abc' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(pollerMock.register).toHaveBeenCalledWith('contact-abc');
+  });
+
+  test('returns 400 for invalid contactId', async () => {
+    const res = await request(appModule.app)
+      .post('/api/poll/start')
+      .send({ contactId: '../bad' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/poll/stop', () => {
+  let appModule;
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.mock('../src/poller', () => ({
+      init: jest.fn(),
+      register: jest.fn(),
+      deregister: jest.fn(),
+      isActive: jest.fn().mockReturnValue(false),
+      shutdown: jest.fn(),
+    }));
+    jest.mock('redis', () => ({
+      createClient: () => ({
+        on: jest.fn(),
+        connect: jest.fn().mockResolvedValue(undefined),
+        get: jest.fn().mockResolvedValue(null),
+        set: jest.fn().mockResolvedValue('OK'),
+        setEx: jest.fn().mockResolvedValue('OK'),
+        hGetAll: jest.fn().mockResolvedValue({}),
+      }),
+    }));
+    jest.mock('libsodium-wrappers', () => ({
+      ready: Promise.resolve(),
+      crypto_box_keypair: () => ({ publicKey: new Uint8Array(32), privateKey: new Uint8Array(32) }),
+      from_string: (s) => Buffer.from(s),
+      crypto_generichash: () => new Uint8Array(32),
+      crypto_scalarmult_base: () => new Uint8Array(32),
+    }));
+    appModule = require('../src/index');
+  });
+
+  test('returns 200 and calls poller.deregister', async () => {
+    const pollerMock = require('../src/poller');
+    const res = await request(appModule.app)
+      .post('/api/poll/stop')
+      .send({ contactId: 'contact-abc' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(pollerMock.deregister).toHaveBeenCalledWith('contact-abc');
+  });
+
+  test('is idempotent — returns 200 for unknown contactId', async () => {
+    const res = await request(appModule.app)
+      .post('/api/poll/stop')
+      .send({ contactId: 'never-registered' });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('GET /api/messages/:contactId (pure Redis read)', () => {
+  let appModule;
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.mock('../src/poller', () => ({
+      init: jest.fn(),
+      register: jest.fn(),
+      deregister: jest.fn(),
+      isActive: jest.fn(),
+      shutdown: jest.fn(),
+    }));
+    jest.mock('redis', () => ({
+      createClient: () => ({
+        on: jest.fn(),
+        connect: jest.fn().mockResolvedValue(undefined),
+        get: jest.fn().mockResolvedValue(JSON.stringify([
+          { id: 'msg-1', text: 'hello', sent: false, time: '10:00', timestamp: 1715000000000, meta: null },
+        ])),
+        set: jest.fn().mockResolvedValue('OK'),
+        setEx: jest.fn().mockResolvedValue('OK'),
+        hGetAll: jest.fn().mockResolvedValue({}),
+      }),
+    }));
+    jest.mock('libsodium-wrappers', () => ({
+      ready: Promise.resolve(),
+      crypto_box_keypair: () => ({ publicKey: new Uint8Array(32), privateKey: new Uint8Array(32) }),
+      from_string: (s) => Buffer.from(s),
+      crypto_generichash: () => new Uint8Array(32),
+      crypto_scalarmult_base: () => new Uint8Array(32),
+    }));
+    appModule = require('../src/index');
+  });
+
+  test('returns messages from Redis without calling receive()', async () => {
+    const res = await request(appModule.app).get('/api/messages/contact-1');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].text).toBe('hello');
+  });
+
+  test('seed query param is ignored — no receive() call', async () => {
+    const res = await request(appModule.app).get('/api/messages/contact-1?seed=topsecret');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+  });
+});
